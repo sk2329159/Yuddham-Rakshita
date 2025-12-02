@@ -8,6 +8,8 @@ import subprocess
 from pathlib import Path
 from typing import List, Literal, Optional
 
+from .activity_log import log_event  # NEW: logging integration
+
 Direction = Literal["in", "out", "both"]
 
 # Prefix for all rules created by our tool
@@ -122,6 +124,13 @@ def _clear_all_fwassist_rules() -> None:
             else:
                 raise
 
+    # Log once after clearing
+    log_event(
+        "FWASSIST_RULES_CLEARED",
+        f"Cleared {len(names)} FWAssist_* firewall rules",
+        {"count": len(names), "rule_prefix": FW_RULE_PREFIX},
+    )
+
 
 # ---------------------------------------------------------------------------
 # Core app-level rule operations
@@ -138,6 +147,11 @@ def block_app(path: str, direction: Direction = "out") -> None:
         print("[WARNING] This looks like a Microsoft Store/UWP app under WindowsApps.")
         print("         Current tool is focused on classic desktop .exe apps.")
         print("         Please test with something like C:\\Windows\\System32\\notepad.exe.")
+        log_event(
+            "APP_BLOCK_SKIPPED_WINDOWSAPPS",
+            f"Skipped blocking UWP/Store app at {exe_path}",
+            {"exe_path": exe_path},
+        )
         return
 
     if direction == "both":
@@ -163,6 +177,13 @@ def block_app(path: str, direction: Direction = "out") -> None:
     _run_netsh(args)
     print("[OK] Rule created.")
 
+    # Log the change
+    log_event(
+        "APP_BLOCK_RULE_CREATED",
+        f"Blocked {exe_path} ({direction})",
+        {"exe_path": exe_path, "direction": direction, "rule_name": rule_name},
+    )
+
 
 def allow_app(path: str) -> None:
     """
@@ -175,11 +196,13 @@ def allow_app(path: str) -> None:
     rule_names = _rule_names_for_exe(exe_path)
 
     removed_any = False
+    actually_removed: list[str] = []
     for name in rule_names:
         try:
             _run_netsh(["delete", "rule", f"name={name}"])
             print(f"[OK] Deleted rule '{name}' (if it existed).")
             removed_any = True
+            actually_removed.append(name)
         except RuntimeError as e:
             msg = str(e)
             if "No rules match the specified criteria" in msg:
@@ -190,6 +213,17 @@ def allow_app(path: str) -> None:
 
     if not removed_any:
         print("[INFO] No FWAssist_* rules existed for this app. Nothing to remove.")
+        log_event(
+            "APP_ALLOW_NO_RULES",
+            f"No FWAssist_* rules found to remove for {exe_path}",
+            {"exe_path": exe_path},
+        )
+    else:
+        log_event(
+            "APP_RULES_REMOVED",
+            f"Removed FWAssist rules for {exe_path}",
+            {"exe_path": exe_path, "rules": actually_removed},
+        )
 
 
 def status_app(path: str) -> None:
@@ -230,7 +264,7 @@ def status_app(path: str) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Profile sync (Week 2 – real implementation)
+# Profile sync (Week 2/3 – real implementation + logging)
 # ---------------------------------------------------------------------------
 
 def sync_profile_to_windows_firewall(
@@ -249,7 +283,6 @@ def sync_profile_to_windows_firewall(
                * if action == "allow": remove any FWAssist_* rules for that app
     """
     from .config import load_config
-    from .models import AppRule
 
     cfg = load_config()
 
@@ -259,27 +292,53 @@ def sync_profile_to_windows_firewall(
     profile = cfg.profiles[profile_name]
 
     print(f"[INFO] Syncing profile '{profile_name}' to Windows Firewall...")
+    log_event(
+        "PROFILE_SYNC_START",
+        f"Syncing profile '{profile_name}' to Windows Firewall",
+        {"profile": profile_name},
+    )
 
     # 1) Clear all rules our tool has created before
     _clear_all_fwassist_rules()
 
     # 2) Apply rules for this profile
     for exe_path, rule in profile.app_rules.items():
-        # Normalize exe path
         exe_path_resolved = str(Path(exe_path).resolve())
 
         if rule.action == "block":
-            # Respect the direction field; default 'out'
-            dir_value: Direction = rule.direction  # type: ignore[assignment]
+            dir_value: Direction = rule.direction  # type-ignored; we sanitize in config
             block_app(exe_path_resolved, direction=dir_value)
+            log_event(
+                "PROFILE_RULE_APPLIED",
+                f"Profile '{profile_name}' blocking {exe_path_resolved} ({dir_value})",
+                {
+                    "profile": profile_name,
+                    "exe_path": exe_path_resolved,
+                    "action": "block",
+                    "direction": dir_value,
+                },
+            )
         elif rule.action == "allow":
-            # Remove any FWAssist_* rules for this exe (if any)
             allow_app(exe_path_resolved)
+            log_event(
+                "PROFILE_RULE_APPLIED",
+                f"Profile '{profile_name}' allowing {exe_path_resolved}",
+                {
+                    "profile": profile_name,
+                    "exe_path": exe_path_resolved,
+                    "action": "allow",
+                },
+            )
         else:
             # Should not happen because Action is Literal["allow","block"]
             continue
 
     print(f"[INFO] Profile '{profile_name}' sync complete.")
+    log_event(
+        "PROFILE_SYNC_DONE",
+        f"Finished syncing profile '{profile_name}'",
+        {"profile": profile_name},
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -289,7 +348,7 @@ def sync_profile_to_windows_firewall(
 def _cli() -> None:
     parser = argparse.ArgumentParser(
         description=(
-            "Week 1/2 – Windows Firewall control per application (FWAssist).\n"
+            "Week 1/2/3 – Windows Firewall control per application (FWAssist).\n"
             "Run this as Administrator."
         )
     )
