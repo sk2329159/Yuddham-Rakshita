@@ -1,3 +1,5 @@
+# firewall_assistant/config.py
+
 from __future__ import annotations
 
 import json
@@ -7,15 +9,14 @@ from typing import Any, Dict
 
 from .models import FullConfig, AppInfo, ProfileConfig, AppRule, Action, Direction
 
-
-# Repo root: parent of the package directory
+# Repo root (same style as activity_log.py)
 ROOT_DIR = Path(__file__).resolve().parent.parent
 CONFIG_PATH = ROOT_DIR / "config.json"
 
 
 def _default_raw_config() -> Dict[str, Any]:
     """
-    Default config structure as plain dict (matches the JSON format).
+    Default config structure as plain dict (matches JSON).
     """
     return {
         "version": 1,
@@ -31,7 +32,7 @@ def _default_raw_config() -> Dict[str, Any]:
             "public_wifi": {
                 "display_name": "Public Wi-Fi",
                 "description": "Stricter rules for public networks.",
-                "default_action": "allow",  # conceptually might be 'block' unknown later
+                "default_action": "allow",
                 "app_rules": {},
             },
             "focus": {
@@ -72,16 +73,14 @@ def parse_full_config(raw: Dict[str, Any]) -> FullConfig:
     """
     Convert a raw dict (as loaded from JSON) into FullConfig & dataclasses.
     """
-    from pathlib import Path as _Path
-
     version = int(raw.get("version", 1))
     active_profile = raw.get("active_profile", "normal")
 
-    # Apps
+    # --- Apps ---
     apps: Dict[str, AppInfo] = {}
     apps_raw: Dict[str, Any] = raw.get("apps", {}) or {}
     for exe_path, app_data in apps_raw.items():
-        name = app_data.get("name") or _Path(exe_path).name
+        name = app_data.get("name") or Path(exe_path).name
         tags = list(app_data.get("tags", []))
         last_seen = app_data.get("last_seen")
         pinned = bool(app_data.get("pinned", False))
@@ -94,11 +93,10 @@ def parse_full_config(raw: Dict[str, Any]) -> FullConfig:
             pinned=pinned,
         )
 
-    # Profiles
+    # --- Profiles ---
     profiles: Dict[str, ProfileConfig] = {}
     profiles_raw: Dict[str, Any] = raw.get("profiles", {}) or {}
 
-    # If no profiles in file, fall back to defaults
     if not profiles_raw:
         profiles_raw = _default_raw_config()["profiles"]
 
@@ -109,7 +107,7 @@ def parse_full_config(raw: Dict[str, Any]) -> FullConfig:
         value = (value or "out").lower()
         if value in ("in", "out", "both"):
             return value  # type: ignore[return-value]
-        return "out"  # type: ignore[return-value]
+        return "out"      # type: ignore[return-value]
 
     for p_name, p_data in profiles_raw.items():
         display_name = p_data.get("display_name") or p_name.title()
@@ -140,10 +138,10 @@ def parse_full_config(raw: Dict[str, Any]) -> FullConfig:
         )
 
     # Ensure our 3 base profiles always exist
-    default_profiles_raw = _default_raw_config()["profiles"]
+    defaults = _default_raw_config()["profiles"]
     for p_name in ("normal", "public_wifi", "focus"):
         if p_name not in profiles:
-            p_data = default_profiles_raw[p_name]
+            p_data = defaults[p_name]
             profiles[p_name] = ProfileConfig(
                 name=p_name,
                 display_name=p_data["display_name"],
@@ -205,12 +203,12 @@ def full_config_to_raw(cfg: FullConfig) -> Dict[str, Any]:
 def load_config() -> FullConfig:
     """
     Convenience: load_raw_config + parse_full_config.
-    If there is any error, fall back to a fresh default config on disk.
+    On error, reset to default config on disk.
     """
     try:
         raw = load_raw_config()
         return parse_full_config(raw)
-    except Exception as exc:  # broad on purpose; log + reset
+    except Exception as exc:
         print(f"[config] Error loading config; resetting to default: {exc}")
         return ensure_default_config()
 
@@ -225,8 +223,8 @@ def save_config(cfg: FullConfig) -> None:
 
 def ensure_default_config() -> FullConfig:
     """
-    If config.json missing or invalid, create a default config file
-    and return it as FullConfig.
+    Create a default config.json on disk and return it as FullConfig.
+    Useful if the file was missing or corrupted.
     """
     raw = _default_raw_config()
     save_raw_config(raw)
@@ -234,7 +232,7 @@ def ensure_default_config() -> FullConfig:
 
 
 if __name__ == "__main__":
-    # Quick self-test
+    # Simple self-test
     cfg = load_config()
     print("Active profile:", cfg.active_profile)
     print("Profiles:", list(cfg.profiles.keys()))

@@ -1,19 +1,22 @@
+# firewall_assistant/profiles.py
+
 from __future__ import annotations
 
 from .models import FullConfig, ProfileConfig, Action, AppRule
 from .config import load_config, save_config
-from .firewall_win import sync_profile_to_windows_firewall
+from .firewall_win import block_app, allow_app, sync_profile_to_windows_firewall
 
 
 def get_active_profile(cfg: FullConfig) -> ProfileConfig:
     """
     Return the currently active ProfileConfig from FullConfig.
-    If cfg.active_profile is invalid, try to repair it.
+    If cfg.active_profile is invalid, try to repair it to 'normal' or
+    the first available profile.
     """
     if cfg.active_profile in cfg.profiles:
         return cfg.profiles[cfg.active_profile]
 
-    # Try to repair
+    # Attempt to repair
     if "normal" in cfg.profiles:
         cfg.active_profile = "normal"
     elif cfg.profiles:
@@ -42,7 +45,7 @@ def apply_profile(profile_name: str) -> None:
     High-level: load config, set active_profile, save config,
     and call sync_profile_to_windows_firewall(profile_name).
 
-    UI should call this when user selects a profile.
+    UI or CLI should call this when the user selects a profile.
     """
     cfg = load_config()
 
@@ -52,7 +55,7 @@ def apply_profile(profile_name: str) -> None:
     cfg.active_profile = profile_name
     save_config(cfg)
 
-    # Now actually enforce the profile in Windows Firewall
+    # Enforce the profile via Windows Firewall (implemented in firewall_win)
     sync_profile_to_windows_firewall(profile_name)
 
 
@@ -64,8 +67,10 @@ def set_app_action_in_profile(
 ) -> None:
     """
     In the given profile, set app_rules[exe_path].action = action.
-    If rule does not exist, create it. Caller should then save_config() and
-    (optionally) apply_profile(cfg.active_profile) to sync to Windows Firewall.
+    If rule does not exist, create it with default direction='out'.
+
+    Caller should then save_config(cfg) and (optionally) apply_profile(cfg.active_profile)
+    to sync changes to Windows Firewall.
     """
     if profile_name not in cfg.profiles:
         raise ValueError(f"Profile '{profile_name}' not found")
@@ -83,15 +88,29 @@ def set_app_action_in_profile(
         profile.app_rules[exe_path] = rule
     else:
         rule.action = action
-        # When user explicitly changes action, clear any temporary timer
-        rule.temporary_until = None
+        rule.temporary_until = None  # clear temporary flag when user sets explicitly
 
 
 if __name__ == "__main__":
-    # Quick manual test (non-firewall part)
+    # Simple CLI to test profile application
+    import argparse
+    parser = argparse.ArgumentParser(
+        description="Profile management test CLI (Member 1, Week 2)."
+    )
+    parser.add_argument(
+        "profile",
+        nargs="?",
+        help="Profile name to apply (e.g. normal, public_wifi, focus)",
+    )
+    args = parser.parse_args()
+
     cfg = load_config()
-    print("Before:", cfg.active_profile)
-    set_app_action_in_profile(cfg, "focus", r"C:\Test\game.exe", "block")
-    save_config(cfg)
-    apply_profile("focus")  # will actually call netsh; run as admin if you try this
-    print("After:", load_config().active_profile)
+    print("Existing profiles:", ", ".join(cfg.profiles.keys()))
+    print("Active profile before:", cfg.active_profile)
+
+    if args.profile:
+        apply_profile(args.profile)
+        cfg2 = load_config()
+        print("Active profile after:", cfg2.active_profile)
+    else:
+        print("No profile name given; not changing anything.")

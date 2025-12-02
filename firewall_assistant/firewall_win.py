@@ -65,8 +65,66 @@ def _rule_names_for_exe(exe_path: str) -> list[str]:
     ]
 
 
+def _list_all_fwassist_rule_names() -> list[str]:
+    """
+    Return all FWAssist_* rule names currently present in Windows Firewall.
+
+    We do:
+      - netsh advfirewall firewall show rule name=all
+      - parse all 'Rule Name:' lines
+      - keep only those starting with FW_RULE_PREFIX
+    """
+    try:
+        result = _run_netsh(["show", "rule", "name=all"])
+    except RuntimeError as e:
+        msg = str(e)
+        if "No rules match the specified criteria" in msg:
+            return []
+        raise
+
+    stdout = result.stdout or ""
+    lines = stdout.splitlines()
+
+    names: list[str] = []
+    for line in lines:
+        s = line.strip()
+        if not s:
+            continue
+        if s.lower().startswith("rule name:"):
+            parts = s.split(":", 1)
+            if len(parts) == 2:
+                name = parts[1].strip()
+                if name.startswith(FW_RULE_PREFIX):
+                    names.append(name)
+
+    # Deduplicate in case netsh outputs duplicates
+    return sorted(set(names))
+
+
+def _clear_all_fwassist_rules() -> None:
+    """
+    Delete all FWAssist_* rules globally.
+
+    This is used when switching profiles so we don't leave stale rules
+    from previous profiles.
+    """
+    names = _list_all_fwassist_rule_names()
+    if not names:
+        return
+
+    for name in names:
+        try:
+            _run_netsh(["delete", "rule", f"name={name}"])
+        except RuntimeError as e:
+            msg = str(e)
+            if "No rules match the specified criteria" in msg:
+                continue
+            else:
+                raise
+
+
 # ---------------------------------------------------------------------------
-# Core Week 1 functionality
+# Core app-level rule operations
 # ---------------------------------------------------------------------------
 
 def block_app(path: str, direction: Direction = "out") -> None:
@@ -78,7 +136,7 @@ def block_app(path: str, direction: Direction = "out") -> None:
 
     if "WindowsApps" in exe_path:
         print("[WARNING] This looks like a Microsoft Store/UWP app under WindowsApps.")
-        print("         Week 1 tool is focused on classic desktop .exe apps.")
+        print("         Current tool is focused on classic desktop .exe apps.")
         print("         Please test with something like C:\\Windows\\System32\\notepad.exe.")
         return
 
@@ -172,29 +230,56 @@ def status_app(path: str) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Profile sync stub (Week 1)
+# Profile sync (Week 2 – real implementation)
 # ---------------------------------------------------------------------------
 
 def sync_profile_to_windows_firewall(
     profile_name: str,
-    cfg_path: Optional[str] = None,
+    cfg_path: Optional[str] = None,  # cfg_path unused; config module has global path
 ) -> None:
     """
-    Week 1 stub.
+    Enforce the given profile in Windows Firewall.
 
-    In later weeks, this will:
-      - Load config (or use cfg_path)
-      - Look at the profile's app_rules
-      - Call block_app/allow_app as needed to enforce the profile.
-
-    For now, it's a no-op (just prints) so that profiles.apply_profile()
-    works without breaking imports.
+    Steps:
+      1) Load config.json
+      2) Clear all existing FWAssist_* rules
+      3) For the selected profile:
+           - For each app rule:
+               * if action == "block": create a block rule (respecting direction)
+               * if action == "allow": remove any FWAssist_* rules for that app
     """
-    msg = f"[stub] sync_profile_to_windows_firewall('{profile_name}'"
-    if cfg_path is not None:
-        msg += f", cfg_path='{cfg_path}'"
-    msg += ") – not implemented yet"
-    print(msg)
+    from .config import load_config
+    from .models import AppRule
+
+    cfg = load_config()
+
+    if profile_name not in cfg.profiles:
+        raise ValueError(f"Profile '{profile_name}' not found in config")
+
+    profile = cfg.profiles[profile_name]
+
+    print(f"[INFO] Syncing profile '{profile_name}' to Windows Firewall...")
+
+    # 1) Clear all rules our tool has created before
+    _clear_all_fwassist_rules()
+
+    # 2) Apply rules for this profile
+    for exe_path, rule in profile.app_rules.items():
+        # Normalize exe path
+        exe_path_resolved = str(Path(exe_path).resolve())
+
+        if rule.action == "block":
+            # Respect the direction field; default 'out'
+            dir_value: Direction = rule.direction  # type: ignore[assignment]
+            block_app(exe_path_resolved, direction=dir_value)
+        elif rule.action == "allow":
+            # Remove any FWAssist_* rules for this exe (if any)
+            allow_app(exe_path_resolved)
+        else:
+            # Should not happen because Action is Literal["allow","block"]
+            continue
+
+    print(f"[INFO] Profile '{profile_name}' sync complete.")
 
 
 # ---------------------------------------------------------------------------
@@ -204,7 +289,7 @@ def sync_profile_to_windows_firewall(
 def _cli() -> None:
     parser = argparse.ArgumentParser(
         description=(
-            "Week 1 – Simple Windows Firewall control per application (FWAssist).\n"
+            "Week 1/2 – Windows Firewall control per application (FWAssist).\n"
             "Run this as Administrator."
         )
     )

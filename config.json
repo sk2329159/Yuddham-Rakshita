@@ -1,22 +1,24 @@
 {
   "version": 1,
-  "active_profile": "normal", 
-
+  "active_profile": "normal",
   "apps": {
     "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe": {
       "name": "Google Chrome",
-      "tags": ["browser"],
+      "tags": [
+        "browser"
+      ],
       "last_seen": "2025-01-01T12:00:00",
       "pinned": true
     },
     "C:\\Games\\CoolGame\\game.exe": {
       "name": "Cool Game",
-      "tags": ["game"],
+      "tags": [
+        "game"
+      ],
       "last_seen": "2025-01-01T13:00:00",
       "pinned": false
     }
   },
-
   "profiles": {
     "normal": {
       "display_name": "Normal",
@@ -30,7 +32,6 @@
         }
       }
     },
-
     "public_wifi": {
       "display_name": "Public Wi-Fi",
       "description": "Stricter rules on public networks.",
@@ -43,7 +44,6 @@
         }
       }
     },
-
     "focus": {
       "display_name": "Focus",
       "description": "Block distracting apps.",
@@ -53,6 +53,11 @@
           "action": "block",
           "direction": "out",
           "temporary_until": "2025-01-01T16:00:00"
+        },
+        "C:\\Windows\\System32\\notepad.exe": {
+          "action": "block",
+          "direction": "out",
+          "temporary_until": null
         }
       }
     }
