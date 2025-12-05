@@ -91,7 +91,7 @@ firewall_assistant/
 ### 🚀 Steps
 ```bash
 git clone https://github.com/sk2329159/Yuddham-Rakshita
-cd firewall_assistant
+cd Yuddham-Rakshita-main
 python -m venv .venv
 .venv\Scripts\activate
 pip install psutil
