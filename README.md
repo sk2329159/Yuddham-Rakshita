@@ -90,8 +90,8 @@ firewall_assistant/
 
 ### 🚀 Steps
 ```bash
-git clone <REPO_URL>
-cd <REPO_FOLDER>
+git clone https://github.com/sk2329159/Yuddham-Rakshita
+cd firewall_assistant
 python -m venv .venv
 .venv\Scripts\activate
 pip install psutil
